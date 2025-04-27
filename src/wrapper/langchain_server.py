@@ -4,10 +4,48 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
+import uuid
+import json
+import redis
+from datetime import datetime, timedelta
+
+
+class RedisConfig(BaseModel):
+    host: str = Field(os.environ.get("REDIS_HOST", "localhost"), description="Redis host")
+    port: int = Field(int(os.environ.get("REDIS_PORT", 6379)), description="Redis port")
+    db: int = Field(int(os.environ.get("REDIS_DB", 0)), description="Redis database")
+    password: Optional[str] = Field(os.environ.get("REDIS_PASSWORD"), description="Redis password")
+    conversation_ttl: int = Field(
+        int(os.environ.get("CONVERSATION_TTL", 3600)),
+        description="Conversation time to live in seconds",
+    )
+
+
+# Global Redis configuration
+redis_config = RedisConfig()
+
+
+def get_redis_client():
+    """Get Redis client instance"""
+    try:
+        client = redis.Redis(
+            host=redis_config.host,
+            port=redis_config.port,
+            db=redis_config.db,
+            password=redis_config.password,
+            decode_responses=True,
+        )
+        # Test connection
+        client.ping()
+        return client
+    except redis.ConnectionError as e:
+        raise HTTPException(status_code=500, detail=f"Redis connection error: {str(e)}")
+
 
 app = FastAPI(
     title="LangChain OpenAI API Wrapper",
-    description="A FastAPI server that wraps the LangChain OpenAI chat completion API",
+    description="A FastAPI server that wraps the LangChain OpenAI chat completion API"
+    " with Redis state management",
     version="1.0.0",
 )
 
@@ -22,6 +60,9 @@ class ChatCompletionRequest(BaseModel):
     model: str = Field("gpt-3.5-turbo", description="The OpenAI model to use")
     temperature: float = Field(0.7, description="Controls randomness of the output")
     max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate")
+    conversation_id: Optional[str] = Field(
+        None, description="Conversation ID for continuing a conversation"
+    )
 
 
 class ChatModelRequest(BaseModel):
@@ -38,9 +79,16 @@ class TokenUsage(BaseModel):
 
 class ChatCompletionResponse(BaseModel):
     content: str = Field(..., description="The generated text from the model")
-    # model: str = Field(..., description="The model used for generation")
+    conversation_id: str = Field(..., description="The conversation ID for future reference")
     usage: Optional[TokenUsage] = Field(None, description="Token usage information")
     additional_kwargs: Dict[str, Any] = Field({}, description="Additional metadata")
+
+
+class ConversationResponse(BaseModel):
+    conversation_id: str
+    messages: List[Dict[str, str]]
+    created_at: Optional[str] = None
+    expires_at: Optional[str] = None
 
 
 def get_openai_api_key():
@@ -96,8 +144,23 @@ async def chat_completion(
             api_key=api_key,
         )
 
-        # Convert messages to LangChain format
+        # Initialize Redis client
+        redis_client = get_redis_client()
+
+        # Use provided conversation_id or generate a new one
+        conversation_id = request.conversation_id or str(uuid.uuid4())
+
+        # Initialize messages list
         langchain_messages = []
+
+        # If conversation_id is provided and exists in Redis, retrieve the history
+        if request.conversation_id:
+            stored_messages = get_conversation(redis_client, conversation_id)
+            if stored_messages:
+                # Convert stored messages to LangChain format
+                langchain_messages = dict_to_langchain_messages(stored_messages)
+
+        # Add new messages from the request
         for msg in request.messages:
             if msg.role == "system":
                 langchain_messages.append(SystemMessage(content=msg.content))
@@ -108,6 +171,14 @@ async def chat_completion(
 
         # Get the response
         response = llm.invoke(langchain_messages)
+
+        # Add the assistant's response to the messages
+        langchain_messages.append(AIMessage(content=response.content))
+
+        # Save the updated conversation to Redis
+        save_conversation(
+            redis_client, conversation_id, langchain_to_dict_messages(langchain_messages)
+        )
 
         # Extract token usage if available
         token_usage = None
@@ -123,7 +194,7 @@ async def chat_completion(
         # Construct the response
         result = ChatCompletionResponse(
             content=response.content,
-            # model=llm.model_name,
+            conversation_id=conversation_id,
             usage=token_usage,
             additional_kwargs=response.additional_kwargs,
         )
@@ -137,6 +208,118 @@ async def chat_completion(
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "api": "LangChain OpenAI Wrapper"}
+
+
+# Redis conversation utilities
+def get_conversation_key(conversation_id: str) -> str:
+    """Generate a Redis key for storing conversation history"""
+    return f"conversation:{conversation_id}"
+
+
+def save_conversation(client: redis.Redis, conversation_id: str, messages: List[Dict[str, str]]):
+    """Save conversation history to Redis"""
+    key = get_conversation_key(conversation_id)
+    client.set(key, json.dumps(messages))
+    client.expire(key, redis_config.conversation_ttl)
+
+
+def get_conversation(client: redis.Redis, conversation_id: str) -> List[Dict[str, str]]:
+    """Retrieve conversation history from Redis"""
+    key = get_conversation_key(conversation_id)
+    data = client.get(key)
+    if data:
+        return json.loads(data)
+    return []
+
+
+def langchain_to_dict_messages(messages) -> List[Dict[str, str]]:
+    """Convert LangChain message objects to dictionaries for storage"""
+    result = []
+    for msg in messages:
+        if isinstance(msg, SystemMessage):
+            result.append({"role": "system", "content": msg.content})
+        elif isinstance(msg, HumanMessage):
+            result.append({"role": "user", "content": msg.content})
+        elif isinstance(msg, AIMessage):
+            result.append({"role": "assistant", "content": msg.content})
+    return result
+
+
+def dict_to_langchain_messages(messages):
+    """Convert dictionary messages to LangChain message objects"""
+    result = []
+    for msg in messages:
+        if msg["role"] == "system":
+            result.append(SystemMessage(content=msg["content"]))
+        elif msg["role"] == "user":
+            result.append(HumanMessage(content=msg["content"]))
+        elif msg["role"] == "assistant":
+            result.append(AIMessage(content=msg["content"]))
+    return result
+
+
+@app.get("/v1/conversations/{conversation_id}", response_model=ConversationResponse)
+async def get_conversation_history(
+    conversation_id: str, api_key: str = Depends(get_openai_api_key)
+):
+    """Retrieve a specific conversation history"""
+    try:
+        redis_client = get_redis_client()
+        messages = get_conversation(redis_client, conversation_id)
+
+        if not messages:
+            raise HTTPException(status_code=404, detail=f"Conversation {conversation_id} not found")
+
+        # Get TTL information
+        key = get_conversation_key(conversation_id)
+        ttl = redis_client.ttl(key)
+
+        if ttl > 0:
+            expires_at = (datetime.now() + timedelta(seconds=ttl)).isoformat()
+        else:
+            expires_at = None
+
+        return ConversationResponse(
+            conversation_id=conversation_id,
+            messages=messages,
+            created_at=datetime.now().isoformat(),
+            expires_at=expires_at,
+        )
+    except redis.RedisError as e:
+        raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
+
+
+@app.delete("/v1/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str, api_key: str = Depends(get_openai_api_key)):
+    """Delete a specific conversation history"""
+    try:
+        redis_client = get_redis_client()
+        key = get_conversation_key(conversation_id)
+
+        # Check if conversation exists
+        if not redis_client.exists(key):
+            raise HTTPException(status_code=404, detail=f"Conversation {conversation_id} not found")
+
+        # Delete the conversation
+        redis_client.delete(key)
+
+        return {"status": "success", "message": f"Conversation {conversation_id} deleted"}
+    except redis.RedisError as e:
+        raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
+
+
+@app.get("/v1/conversations", response_model=List[str])
+async def list_conversations(api_key: str = Depends(get_openai_api_key)):
+    """List all conversation IDs"""
+    try:
+        redis_client = get_redis_client()
+        # Get all conversation keys and extract IDs
+        keys = redis_client.keys("conversation:*")
+        conversation_ids = [key.split(":", 1)[1] for key in keys]
+
+        return conversation_ids
+    except redis.RedisError as e:
+        raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
 
 
 if __name__ == "__main__":
