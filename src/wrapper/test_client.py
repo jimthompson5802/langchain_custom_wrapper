@@ -53,6 +53,7 @@ class FastAPIChatOpenAI:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.headers = {"Content-Type": "application/json"}
+        self.conversation_id = None  # Track conversation ID for stateful chat
 
         # Check health of the API server
         self._check_health()
@@ -92,17 +93,22 @@ class FastAPIChatOpenAI:
         if self.max_tokens:
             payload["max_tokens"] = self.max_tokens
 
+        # Add conversation_id if we have one to maintain state
+        if self.conversation_id:
+            payload["conversation_id"] = self.conversation_id
+
         try:
             response = requests.post(chat_url, headers=self.headers, data=json.dumps(payload))
             response.raise_for_status()
 
             result = response.json()
 
+            # Store the conversation_id for future interactions
+            if "conversation_id" in result:
+                self.conversation_id = result["conversation_id"]
+
             # Create an AIMessage from the response
             ai_message = AIMessage(content=result["content"])
-
-            # Add response metadata as attributes
-            # ai_message.model = result["model"]
 
             # Add token usage if available
             if "usage" in result and result["usage"]:
@@ -120,6 +126,69 @@ class FastAPIChatOpenAI:
                 print(f"Response body: {e.response.text}")
             raise e
 
+    def get_conversation_history(self) -> Dict[str, Any]:
+        """
+        Retrieve the current conversation history.
+
+        Returns:
+            Dictionary containing the conversation details
+        """
+        if not self.conversation_id:
+            return {"error": "No active conversation"}
+
+        try:
+            url = f"{self.base_url}/v1/conversations/{self.conversation_id}"
+            response = requests.get(url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error retrieving conversation: {e}")
+            return {"error": str(e)}
+
+    def list_conversations(self) -> List[str]:
+        """
+        List all available conversation IDs.
+
+        Returns:
+            List of conversation IDs
+        """
+        try:
+            url = f"{self.base_url}/v1/conversations"
+            response = requests.get(url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error listing conversations: {e}")
+            return []
+
+    def delete_conversation(self, conversation_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Delete a conversation.
+
+        Args:
+            conversation_id: ID of conversation to delete. If None, uses the current conversation.
+
+        Returns:
+            Response from the server
+        """
+        conv_id = conversation_id or self.conversation_id
+        if not conv_id:
+            return {"error": "No conversation ID provided"}
+
+        try:
+            url = f"{self.base_url}/v1/conversations/{conv_id}"
+            response = requests.delete(url)
+            response.raise_for_status()
+
+            # Reset conversation_id if we deleted the current conversation
+            if conv_id == self.conversation_id:
+                self.conversation_id = None
+
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error deleting conversation: {e}")
+            return {"error": str(e)}
+
 
 def test_langchain_api():
     """
@@ -128,32 +197,72 @@ def test_langchain_api():
     # Create an instance of the FastAPIChatOpenAI class
     chat = FastAPIChatOpenAI()
 
-    # Create messages
-    messages = [
+    print("\n=== Testing Stateful Conversation with Redis ===\n")
+
+    # First interaction: Ask about Hawaii
+    print("First interaction: Asking about Hawaii")
+    messages1 = [
         SystemMessage(content="You are a helpful assistant."),
         HumanMessage(content="What is the capital of Hawaii?"),
     ]
 
     try:
         # Invoke the model
-        response = chat.invoke(messages)
+        response1 = chat.invoke(messages1)
 
-        print("\n--- Response from LangChain OpenAI API ---")
-        print(f"Content: {response.content}")
+        print("\n--- Response 1 ---")
+        print(f"Content: {response1.content}")
+        print(f"Conversation ID: {chat.conversation_id}")
 
-        if hasattr(response, "response_metadata") and response.response_metadata:
-            if "token_usage" in response.response_metadata:
+        # Display token usage if available
+        if hasattr(response1, "response_metadata") and response1.response_metadata:
+            if "token_usage" in response1.response_metadata:
                 print("\n--- Token Usage ---")
-                for key, value in response.response_metadata["token_usage"].items():
+                for key, value in response1.response_metadata["token_usage"].items():
                     print(f"{key}: {value}")
 
-        if hasattr(response, "model"):
-            print(f"\nModel used: {response.model}")
+        # Second interaction: Follow-up question using stored conversation state
+        print("\n\nSecond interaction: Follow-up question")
+        # Note: We only need to send the new message, the history is stored in Redis
+        messages2 = [HumanMessage(content="What's another interesting fact about Hawaii?")]
 
-        if hasattr(response, "additional_kwargs") and response.additional_kwargs:
-            print("\n--- Additional Metadata ---")
-            for key, value in response.additional_kwargs.items():
-                print(f"{key}: {value}")
+        # The conversation ID is automatically included from the previous interaction
+        response2 = chat.invoke(messages2)
+
+        print("\n--- Response 2 ---")
+        print(f"Content: {response2.content}")
+        print(f"Using conversation ID: {chat.conversation_id}")
+
+        # Display token usage for second response if available
+        if hasattr(response2, "response_metadata") and response2.response_metadata:
+            if "token_usage" in response2.response_metadata:
+                print("\n--- Token Usage ---")
+                for key, value in response2.response_metadata["token_usage"].items():
+                    print(f"{key}: {value}")
+
+        # Get conversation history
+        print("\n\nRetrieving full conversation history from Redis:")
+        conversation = chat.get_conversation_history()
+        if "messages" in conversation:
+            for i, msg in enumerate(conversation["messages"]):
+                role = msg["role"].upper()
+                content = msg["content"]
+                print(f"\n[{i+1}. {role}]: {content}")
+
+        # List all conversations
+        print("\n\nListing all available conversations:")
+        conversations = chat.list_conversations()
+        for conv_id in conversations:
+            if conv_id == chat.conversation_id:
+                print(f"- {conv_id} (current)")
+            else:
+                print(f"- {conv_id}")
+
+        # Optionally clean up by deleting the conversation
+        delete_choice = input("\nDelete this conversation? (y/n): ").lower()
+        if delete_choice == "y" or delete_choice == "yes":
+            deletion_result = chat.delete_conversation()
+            print(f"Deletion result: {deletion_result}")
 
     except Exception as e:
         print(f"Error: {e}")
