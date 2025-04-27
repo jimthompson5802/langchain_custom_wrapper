@@ -24,6 +24,12 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate")
 
 
+class ChatModelRequest(BaseModel):
+    model: str = Field("gpt-3.5-turbo", description="The OpenAI model to use")
+    temperature: float = Field(0.7, description="Controls randomness of the output")
+    max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate")
+
+
 class TokenUsage(BaseModel):
     prompt_tokens: int
     completion_tokens: int
@@ -44,13 +50,46 @@ def get_openai_api_key():
     return api_key
 
 
+def create_llm_instance(
+    model: str, temperature: float, max_tokens: Optional[int], api_key: str
+) -> ChatOpenAI:
+    """Create and return a ChatOpenAI instance with the given parameters."""
+    return ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        api_key=api_key,
+    )
+
+
+@app.post("/v1/models/create", response_model=Dict[str, str])
+async def create_model(request: ChatModelRequest, api_key: str = Depends(get_openai_api_key)):
+    """Endpoint to create a ChatOpenAI instance."""
+    try:
+        # Create the ChatOpenAI instance to validate parameters
+        create_llm_instance(
+            model=request.model,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            api_key=api_key,
+        )
+
+        return {
+            "status": "success",
+            "message": f"Model {request.model} configuration is valid",
+            "model": request.model,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating model instance: {str(e)}")
+
+
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
 async def chat_completion(
     request: ChatCompletionRequest, api_key: str = Depends(get_openai_api_key)
 ):
     try:
-        # Initialize the ChatOpenAI instance
-        llm = ChatOpenAI(
+        # Create the ChatOpenAI instance using the helper function
+        llm = create_llm_instance(
             model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
