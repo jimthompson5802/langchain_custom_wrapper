@@ -8,6 +8,9 @@ import uuid
 import json
 import redis
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class RedisConfig(BaseModel):
@@ -172,6 +175,7 @@ async def create_model(request: ChatModelRequest, api_key: str = Depends(get_ope
         model_id = request.model_id or str(uuid.uuid4())
 
         # Create the ChatOpenAI instance to validate parameters
+        # cannot be serialized directly to Redis because it is a thread-safe instance
         create_llm_instance(
             model=request.model,
             temperature=request.temperature,
@@ -226,7 +230,8 @@ async def chat_completion(
             temperature = request.temperature
             max_tokens = request.max_tokens
 
-        # Create the ChatOpenAI instance using the retrieved or request parameters
+        # Have to recreate the ChatOpenAI instance using the retrieved or request parameters
+        # because the instance is not serializable because it is a thread-safe instance
         llm = create_llm_instance(
             model=model,
             temperature=temperature,
