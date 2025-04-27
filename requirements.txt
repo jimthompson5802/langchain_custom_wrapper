@@ -1,0 +1,8 @@
+pandas
+black
+flake8
+langchain
+langchain-openai
+openai
+fastapi
+uvicorn
