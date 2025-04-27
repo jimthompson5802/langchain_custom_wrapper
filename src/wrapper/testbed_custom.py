@@ -6,6 +6,12 @@ parser = argparse.ArgumentParser(description="Run custom LLM testbed with specif
 parser.add_argument(
     "--model", type=str, default="gpt-3.5-turbo", help="Model to use (default: gpt-3.5-turbo)"
 )
+parser.add_argument(
+    "--prompt",
+    type=str,
+    default="What is capital of Hawaii",
+    help="Prompt to send to the model (default: 'What is capital of Hawaii')",
+)
 args = parser.parse_args()
 
 # Initialize the LLM
@@ -14,8 +20,8 @@ llm = FastAPIChatOpenAI(
     temperature=0.7,
 )
 
-# Create a promptcl
-prompt = "What is the capital of Hawaii?"
+# Create a prompt
+prompt = args.prompt
 messages = [HumanMessage(content=prompt)]
 
 # Get the response

@@ -87,7 +87,7 @@ class FastAPIChatOpenAI:
         Returns:
             AIMessage: The response from the model
         """
-        # logger.info(f"Wrapper chat model with messages: {messages}")
+        logger.info(f"Wrapper chat model with messages: {messages}")
         chat_url = f"{self.base_url}/v1/chat/completions"
 
         payload = {

@@ -15,6 +15,12 @@ parser.add_argument(
     default="gpt-3.5-turbo",
     help="OpenAI model to use (default: gpt-3.5-turbo)",
 )
+parser.add_argument(
+    "--prompt",
+    type=str,
+    default="What is capital of Hawaii",
+    help="Prompt to send to the model (default: 'What is capital of Hawaii')",
+)
 args = parser.parse_args()
 
 # Check if OpenAI API key is available
@@ -32,7 +38,7 @@ else:
     )
 
     # Create a prompt
-    prompt = "What is the capital of Hawaii?"
+    prompt = args.prompt
     messages = [HumanMessage(content=prompt)]
 
     # Get the response
