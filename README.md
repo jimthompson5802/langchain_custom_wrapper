@@ -1,6 +1,8 @@
 # LangChain OpenAI API Wrapper
 
-This project provides a FastAPI server that wraps the LangChain OpenAI chat completion API with Redis state management. It allows for stateful conversations with LLMs and storage of model configurations.
+This is proof-of-concept of a FastAPI server that wraps the `langchain` OpenAI chat completion API.  This prototype demonstrates creating a proxy wrapper for `langchain` in a server separate from the client applicaiton. 
+
+![](images/custom.drawio.png)
 
 ## Features
 
@@ -30,15 +32,21 @@ This project provides a FastAPI server that wraps the LangChain OpenAI chat comp
    export REDIS_DB="your_redis_db"          # defaults to 0
    export REDIS_PASSWORD="your_redis_password" # optional
    export CONVERSATION_TTL="3600"           # conversation expiration in seconds (default: 1 hour)
-   export MODEL_TTL="86400"                 # model config expiration in seconds (default: 24 hours)
    ```
 
 ## Running the Server
 
 To start the server, run:
 
+In one terminal, start the Redis server (if not already running):
 ```bash
-cd /Users/jim/Desktop/genai/langchain_wrapper
+# start Redis server (if not already running)
+/opt/homebrew/bin/redis-server 
+```
+
+In another terminal, start the FastAPI server:
+```bash
+cd ~/Desktop/genai/langchain_wrapper
 python src/wrapper/langchain_server.py
 ```
 
@@ -139,8 +147,7 @@ Create and store a model configuration for reuse in chat completions.
 {
   "model": "gpt-3.5-turbo",
   "temperature": 0.7,
-  "max_tokens": null,
-  "model_id": "my-custom-model-id" // optional
+  "max_tokens": null
 }
 ```
 
@@ -224,17 +231,24 @@ FastAPI automatically generates interactive API documentation. After starting th
 
 ```
 langchain_wrapper/
-├── requirements.txt     # Project dependencies
-├── src/
-│   ├── fastapi/
-│   │   ├── client.py    # Basic FastAPI client example
-│   │   └── server.py    # Basic FastAPI server example
-│   └── wrapper/
-│       ├── baseline_testbed.py     # Direct OpenAI API test
-│       ├── fastapi_chat.py         # FastAPI Chat wrapper
-│       ├── langchain_server.py     # Main FastAPI server with Redis
-│       ├── test_client.py          # LangChain-compatible client
-│       ├── test_redis_client.py    # CLI client for testing
-│       ├── testbed_baseline.py     # Baseline testbed
-│       └── testbed_custom.py       # Custom testbed
+├── images/                # Diagrams for documentation
+│   ├── baseline.drawio.png
+│   └── custom.drawio.png
+├── notebooks/             # Jupyter notebooks for demos
+│   ├── demo.ipynb
+│   └── README.md
+├── requirements.txt       # Project dependencies
+├── pyproject.toml         # Python project configuration
+├── README.md              # This file
+└── src/
+    ├── fastapi/
+    │   ├── client.py      # Basic FastAPI client example
+    │   └── server.py      # Basic FastAPI server example
+    └── wrapper/
+        ├── fastapi_chat.py       # FastAPI Chat wrapper for LangChain
+        ├── langchain_server.py   # Main FastAPI server with Redis
+        ├── test_client.py        # LangChain-compatible client
+        ├── test_redis_client.py  # CLI client for testing
+        ├── testbed_baseline.py   # Baseline testbed for direct OpenAI testing
+        └── testbed_custom.py     # Custom testbed for wrapper testing
 ```
