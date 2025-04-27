@@ -7,11 +7,8 @@ def test_langchain_api():
     Test the LangChain OpenAI wrapper API with a sample request.
     """
     # Create an instance of the FastAPIChatOpenAI class
-    # This will also create a model configuration in Redis
-    print("\n=== Creating ChatOpenAI instance and model configuration ===")
+    print("\n=== Creating ChatOpenAI instance ===")
     chat = FastAPIChatOpenAI(model="gpt-4o-mini")
-
-    print(f"Model ID: {chat.model_id}")
 
     print("\n=== Testing Stateful Conversation with Redis ===\n")
 
@@ -43,13 +40,12 @@ def test_langchain_api():
         messages2 = [HumanMessage(content="What's another interesting fact about Hawaii?")]
 
         # The conversation ID is automatically included from the previous interaction
-        # The model ID is automatically included as well
         response2 = chat.invoke(messages2)
 
         print("\n--- Response 2 ---")
         print(f"Content: {response2.content}")
         print(f"Using conversation ID: {chat.conversation_id}")
-        print(f"Using model ID: {chat.model_id}")
+        print(f"Using model: {chat.model_name}")
 
         # Display token usage for second response if available
         if hasattr(response2, "response_metadata") and response2.response_metadata:
@@ -75,20 +71,6 @@ def test_langchain_api():
                 print(f"- {conv_id} (current)")
             else:
                 print(f"- {conv_id}")
-
-        # List all model configurations
-        print("\n\nListing all available model configurations:")
-        models = chat.list_models()
-        for model in models:
-            model_id = model.get("model_id", "unknown")
-            model_config = model.get("config", {})
-            model_name = model_config.get("model", "unknown")
-            temp = model_config.get("temperature", "unknown")
-
-            if model_id == chat.model_id:
-                print(f"- {model_id} (current): {model_name}, temp={temp}")
-            else:
-                print(f"- {model_id}: {model_name}, temp={temp}")
 
         # Optionally clean up by deleting the conversation
         delete_choice = input("\nDelete this conversation? (y/n): ").lower()
