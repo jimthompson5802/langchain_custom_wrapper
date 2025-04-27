@@ -2,6 +2,8 @@
     "[python]": {
     "editor.defaultFormatter": "ms-python.black-formatter",
     "editor.formatOnSave": true
+  },
+  "terminal.integrated.env.osx": {
+    "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
   }
-
 }
