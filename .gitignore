@@ -175,3 +175,7 @@ cython_debug/
 
 # MacOS
 .DS_Store
+
+
+# redis db cache
+*.rdb
