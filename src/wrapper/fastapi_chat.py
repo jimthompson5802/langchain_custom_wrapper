@@ -126,6 +126,10 @@ class FastAPIChatOpenAI:
                 print(f"Response body: {e.response.text}")
             raise e
 
+    ###
+    # TODO: need to decide if the conversation related methods are needed
+    ###
+
     def get_conversation_history(self) -> Dict[str, Any]:
         """
         Retrieve the current conversation history.
