@@ -61,9 +61,6 @@ This project includes multiple test clients to interact with the API:
 A command-line client that provides basic functionality to interact with the server:
 
 ```bash
-# Create a model configuration
-python src/wrapper/test_redis_client.py --action create-model --model gpt-4o-mini --temperature 0.5
-
 # Make a chat request
 python src/wrapper/test_redis_client.py --action chat --prompt "What is the capital of Hawaii?"
 
@@ -72,9 +69,6 @@ python src/wrapper/test_redis_client.py --action chat --prompt "Tell me more abo
 
 # Use a specific model ID
 python src/wrapper/test_redis_client.py --action chat --prompt "How does AI work?" --model_id "your-model-id"
-
-# List all model configurations
-python src/wrapper/test_redis_client.py --action list-models
 
 # List all conversations
 python src/wrapper/test_redis_client.py --action list-conversations
@@ -127,7 +121,7 @@ print(conversations)
 chat.delete_conversation()
 ```
 
-### Baseline Testbed (baseline_testbed.py)
+### Baseline Testbed (testbed_baseline.py)
 
 A simple script to test direct interaction with the OpenAI API via LangChain (without the FastAPI wrapper):
 
@@ -135,29 +129,14 @@ A simple script to test direct interaction with the OpenAI API via LangChain (wi
 python src/wrapper/baseline_testbed.py
 ```
 
-## API Endpoints
+A simple script to test `langchain` wrapper to OpenAI API via LangChain (via the FastAPI server):
 
-### Models
-
-#### POST /v1/models/create
-
-Create and store a model configuration for reuse in chat completions.
-
-```json
-{
-  "model": "gpt-3.5-turbo",
-  "temperature": 0.7,
-  "max_tokens": null
-}
+```bash
+export PYTHONPATH=$PWD:$PYTHONPATH
+python src/wrapper/baseline_custom.py
 ```
 
-#### GET /v1/models/{model_id}
-
-Retrieve a specific model configuration.
-
-#### GET /v1/models
-
-List all stored model configurations.
+## API Endpoints
 
 ### Chat Completions
 
