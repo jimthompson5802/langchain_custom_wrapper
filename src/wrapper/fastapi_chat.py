@@ -49,7 +49,7 @@ class FastAPIChatOpenAI:
         max_tokens: Optional[int] = None,
     ):
         self.base_url = base_url
-        self.model = model
+        self.model_name = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.headers = {"Content-Type": "application/json"}
@@ -78,7 +78,7 @@ class FastAPIChatOpenAI:
             model_url = f"{self.base_url}/v1/models/create"
 
             payload = {
-                "model": self.model,
+                "model": self.model_name,
                 "temperature": self.temperature,
             }
 
@@ -116,7 +116,7 @@ class FastAPIChatOpenAI:
 
         payload = {
             "messages": self._convert_messages_to_api_format(messages),
-            "model": self.model,
+            "model": self.model_name,
             "temperature": self.temperature,
         }
 
