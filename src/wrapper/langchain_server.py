@@ -32,7 +32,7 @@ class TokenUsage(BaseModel):
 
 class ChatCompletionResponse(BaseModel):
     content: str = Field(..., description="The generated text from the model")
-    model: str = Field(..., description="The model used for generation")
+    # model: str = Field(..., description="The model used for generation")
     usage: Optional[TokenUsage] = Field(None, description="Token usage information")
     additional_kwargs: Dict[str, Any] = Field({}, description="Additional metadata")
 
@@ -84,7 +84,7 @@ async def chat_completion(
         # Construct the response
         result = ChatCompletionResponse(
             content=response.content,
-            model=llm.model_name,
+            # model=llm.model_name,
             usage=token_usage,
             additional_kwargs=response.additional_kwargs,
         )
