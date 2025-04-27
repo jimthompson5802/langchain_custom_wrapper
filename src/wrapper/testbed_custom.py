@@ -1,9 +1,16 @@
 from src.wrapper.fastapi_chat import FastAPIChatOpenAI, HumanMessage
+import argparse
 
+# Parse command line arguments
+parser = argparse.ArgumentParser(description="Run custom LLM testbed with specified model.")
+parser.add_argument(
+    "--model", type=str, default="gpt-3.5-turbo", help="Model to use (default: gpt-3.5-turbo)"
+)
+args = parser.parse_args()
 
 # Initialize the LLM
 llm = FastAPIChatOpenAI(
-    model="gpt-3.5-turbo",
+    model=args.model,
     temperature=0.7,
 )
 

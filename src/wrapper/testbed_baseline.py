@@ -1,6 +1,21 @@
 import os
+import argparse
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Set up command line arguments
+parser = argparse.ArgumentParser(description="LangChain testbed with OpenAI models")
+parser.add_argument(
+    "--model",
+    type=str,
+    default="gpt-3.5-turbo",
+    help="OpenAI model to use (default: gpt-3.5-turbo)",
+)
+args = parser.parse_args()
 
 # Check if OpenAI API key is available
 api_key = os.environ.get("OPENAI_API_KEY")
@@ -12,7 +27,7 @@ else:
 
     # Initialize the LLM
     llm = ChatOpenAI(
-        model="gpt-3.5-turbo",
+        model=args.model,
         temperature=0.7,
     )
 
@@ -22,6 +37,7 @@ else:
 
     # Get the response
     print(f"\nSending prompt: '{prompt}'")
+    print(f"Using model: {args.model}")
     response = llm.invoke(messages)
 
     # Display the response with metadata
