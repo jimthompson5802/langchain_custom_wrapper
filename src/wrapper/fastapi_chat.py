@@ -2,6 +2,11 @@ import requests
 import json
 from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class Message(BaseModel):
@@ -82,6 +87,7 @@ class FastAPIChatOpenAI:
         Returns:
             AIMessage: The response from the model
         """
+        # logger.info(f"Wrapper chat model with messages: {messages}")
         chat_url = f"{self.base_url}/v1/chat/completions"
 
         payload = {

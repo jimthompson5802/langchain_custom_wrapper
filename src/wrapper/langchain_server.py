@@ -2,8 +2,10 @@ import os
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
+
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
+
 import uuid
 import json
 import redis
@@ -117,14 +119,15 @@ def get_openai_api_key():
 
 
 def create_llm_instance(
-    model: str, temperature: float, max_tokens: Optional[int], api_key: str
+    model: str,
+    temperature: float,
+    max_tokens: Optional[int],
 ) -> ChatOpenAI:
     """Create and return a ChatOpenAI instance with the given parameters."""
     return ChatOpenAI(
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
-        api_key=api_key,
     )
 
 
@@ -147,7 +150,6 @@ async def chat_completion(
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
-            api_key=api_key,
         )
 
         # Use provided conversation_id or generate a new one
