@@ -19,6 +19,10 @@ class RedisConfig(BaseModel):
         int(os.environ.get("CONVERSATION_TTL", 3600)),
         description="Conversation time to live in seconds",
     )
+    model_ttl: int = Field(
+        int(os.environ.get("MODEL_TTL", 86400)),  # 24 hours default
+        description="Model configuration time to live in seconds",
+    )
 
 
 # Global Redis configuration
@@ -34,6 +38,22 @@ def get_redis_client():
             db=redis_config.db,
             password=redis_config.password,
             decode_responses=True,
+        )
+        # Test connection
+        client.ping()
+        return client
+    except redis.ConnectionError as e:
+        raise HTTPException(status_code=500, detail=f"Redis connection error: {str(e)}")
+
+
+def get_binary_redis_client():
+    """Get Redis client instance without decode_responses for binary data (like model storage)"""
+    try:
+        client = redis.Redis(
+            host=redis_config.host,
+            port=redis_config.port,
+            db=redis_config.db,
+            password=redis_config.password,
         )
         # Test connection
         client.ping()
@@ -63,12 +83,25 @@ class ChatCompletionRequest(BaseModel):
     conversation_id: Optional[str] = Field(
         None, description="Conversation ID for continuing a conversation"
     )
+    model_id: Optional[str] = Field(
+        None, description="Model ID to use a previously created model configuration"
+    )
 
 
 class ChatModelRequest(BaseModel):
     model: str = Field("gpt-3.5-turbo", description="The OpenAI model to use")
     temperature: float = Field(0.7, description="Controls randomness of the output")
     max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate")
+    model_id: Optional[str] = Field(
+        None, description="Custom model ID. If not provided, one will be generated."
+    )
+
+
+class ModelResponse(BaseModel):
+    status: str
+    message: str
+    model: str
+    model_id: str
 
 
 class TokenUsage(BaseModel):
@@ -110,10 +143,34 @@ def create_llm_instance(
     )
 
 
-@app.post("/v1/models/create", response_model=Dict[str, str])
+def get_model_key(model_id: str) -> str:
+    """Generate a Redis key for storing model configuration"""
+    return f"model:{model_id}"
+
+
+def save_model_config(client: redis.Redis, model_id: str, config: Dict[str, Any]):
+    """Save model configuration to Redis"""
+    key = get_model_key(model_id)
+    client.set(key, json.dumps(config))
+    client.expire(key, redis_config.model_ttl)
+
+
+def get_model_config(client: redis.Redis, model_id: str) -> Dict[str, Any]:
+    """Retrieve model configuration from Redis"""
+    key = get_model_key(model_id)
+    data = client.get(key)
+    if data:
+        return json.loads(data)
+    return None
+
+
+@app.post("/v1/models/create", response_model=ModelResponse)
 async def create_model(request: ChatModelRequest, api_key: str = Depends(get_openai_api_key)):
-    """Endpoint to create a ChatOpenAI instance."""
+    """Endpoint to create a ChatOpenAI instance and store its configuration in Redis."""
     try:
+        # Generate model_id if not provided
+        model_id = request.model_id or str(uuid.uuid4())
+
         # Create the ChatOpenAI instance to validate parameters
         create_llm_instance(
             model=request.model,
@@ -122,11 +179,21 @@ async def create_model(request: ChatModelRequest, api_key: str = Depends(get_ope
             api_key=api_key,
         )
 
-        return {
-            "status": "success",
-            "message": f"Model {request.model} configuration is valid",
+        # Store model configuration in Redis
+        redis_client = get_redis_client()
+        model_config = {
             "model": request.model,
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
         }
+        save_model_config(redis_client, model_id, model_config)
+
+        return ModelResponse(
+            status="success",
+            message=f"Model {request.model} configuration created and stored",
+            model=request.model,
+            model_id=model_id,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating model instance: {str(e)}")
 
@@ -136,16 +203,36 @@ async def chat_completion(
     request: ChatCompletionRequest, api_key: str = Depends(get_openai_api_key)
 ):
     try:
-        # Create the ChatOpenAI instance using the helper function
-        llm = create_llm_instance(
-            model=request.model,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            api_key=api_key,
-        )
-
         # Initialize Redis client
         redis_client = get_redis_client()
+
+        # Check if model_id is provided
+        model_id = request.model_id
+
+        # If model_id is provided, retrieve model config from Redis
+        if model_id:
+            model_config = get_model_config(redis_client, model_id)
+            if not model_config:
+                raise HTTPException(
+                    status_code=404, detail=f"Model configuration with ID {model_id} not found"
+                )
+            # Use the stored configuration
+            model = model_config["model"]
+            temperature = model_config["temperature"]
+            max_tokens = model_config["max_tokens"]
+        else:
+            # Use configuration from the request
+            model = request.model
+            temperature = request.temperature
+            max_tokens = request.max_tokens
+
+        # Create the ChatOpenAI instance using the retrieved or request parameters
+        llm = create_llm_instance(
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            api_key=api_key,
+        )
 
         # Use provided conversation_id or generate a new one
         conversation_id = request.conversation_id or str(uuid.uuid4())
@@ -318,6 +405,51 @@ async def list_conversations(api_key: str = Depends(get_openai_api_key)):
         conversation_ids = [key.split(":", 1)[1] for key in keys]
 
         return conversation_ids
+    except redis.RedisError as e:
+        raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
+
+
+# New endpoint to retrieve model configurations
+@app.get("/v1/models/{model_id}")
+async def get_model(model_id: str, api_key: str = Depends(get_openai_api_key)):
+    """Retrieve a model configuration by ID"""
+    try:
+        redis_client = get_redis_client()
+        model_config = get_model_config(redis_client, model_id)
+
+        if not model_config:
+            raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+
+        return {
+            "model_id": model_id,
+            "config": model_config,
+        }
+    except redis.RedisError as e:
+        raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
+
+
+# New endpoint to list all stored model configurations
+@app.get("/v1/models", response_model=List[Dict[str, Any]])
+async def list_models(api_key: str = Depends(get_openai_api_key)):
+    """List all stored model configurations"""
+    try:
+        redis_client = get_redis_client()
+        # Get all model keys and extract IDs
+        keys = redis_client.keys("model:*")
+        models = []
+
+        for key in keys:
+            model_id = key.split(":", 1)[1]
+            model_config = get_model_config(redis_client, model_id)
+            if model_config:
+                models.append(
+                    {
+                        "model_id": model_id,
+                        "config": model_config,
+                    }
+                )
+
+        return models
     except redis.RedisError as e:
         raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
 

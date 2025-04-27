@@ -54,9 +54,13 @@ class FastAPIChatOpenAI:
         self.max_tokens = max_tokens
         self.headers = {"Content-Type": "application/json"}
         self.conversation_id = None  # Track conversation ID for stateful chat
+        self.model_id = None  # Track model ID for cached model configuration
 
         # Check health of the API server
         self._check_health()
+
+        # Create model configuration in Redis
+        self._create_model()
 
     def _check_health(self) -> Dict[str, Any]:
         """Check if the API server is healthy."""
@@ -67,6 +71,32 @@ class FastAPIChatOpenAI:
         except requests.exceptions.RequestException as e:
             print(f"Warning: API server health check failed: {e}")
             return {"status": "unhealthy", "error": str(e)}
+
+    def _create_model(self) -> None:
+        """Create a model configuration in Redis."""
+        try:
+            model_url = f"{self.base_url}/v1/models/create"
+
+            payload = {
+                "model": self.model,
+                "temperature": self.temperature,
+            }
+
+            if self.max_tokens:
+                payload["max_tokens"] = self.max_tokens
+
+            response = requests.post(model_url, headers=self.headers, data=json.dumps(payload))
+            response.raise_for_status()
+
+            result = response.json()
+            self.model_id = result["model_id"]
+            print(f"Created model configuration with ID: {self.model_id}")
+
+        except requests.exceptions.RequestException as e:
+            print(f"Error creating model configuration: {e}")
+            if hasattr(e, "response") and e.response:
+                print(f"Response status code: {e.response.status_code}")
+                print(f"Response body: {e.response.text}")
 
     def _convert_messages_to_api_format(self, messages: List[Message]) -> List[Dict[str, str]]:
         """Convert LangChain style messages to API format."""
@@ -92,6 +122,10 @@ class FastAPIChatOpenAI:
 
         if self.max_tokens:
             payload["max_tokens"] = self.max_tokens
+
+        # Add model_id for the cached model configuration
+        if self.model_id:
+            payload["model_id"] = self.model_id
 
         # Add conversation_id if we have one to maintain state
         if self.conversation_id:
@@ -161,6 +195,22 @@ class FastAPIChatOpenAI:
             print(f"Error listing conversations: {e}")
             return []
 
+    def list_models(self) -> List[Dict[str, Any]]:
+        """
+        List all available model configurations.
+
+        Returns:
+            List of model configurations
+        """
+        try:
+            url = f"{self.base_url}/v1/models"
+            response = requests.get(url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error listing models: {e}")
+            return []
+
     def delete_conversation(self, conversation_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Delete a conversation.
@@ -195,7 +245,11 @@ def test_langchain_api():
     Test the LangChain OpenAI wrapper API with a sample request.
     """
     # Create an instance of the FastAPIChatOpenAI class
-    chat = FastAPIChatOpenAI()
+    # This will also create a model configuration in Redis
+    print("\n=== Creating ChatOpenAI instance and model configuration ===")
+    chat = FastAPIChatOpenAI(model="gpt-4o-mini")
+
+    print(f"Model ID: {chat.model_id}")
 
     print("\n=== Testing Stateful Conversation with Redis ===\n")
 
@@ -227,11 +281,13 @@ def test_langchain_api():
         messages2 = [HumanMessage(content="What's another interesting fact about Hawaii?")]
 
         # The conversation ID is automatically included from the previous interaction
+        # The model ID is automatically included as well
         response2 = chat.invoke(messages2)
 
         print("\n--- Response 2 ---")
         print(f"Content: {response2.content}")
         print(f"Using conversation ID: {chat.conversation_id}")
+        print(f"Using model ID: {chat.model_id}")
 
         # Display token usage for second response if available
         if hasattr(response2, "response_metadata") and response2.response_metadata:
@@ -257,6 +313,20 @@ def test_langchain_api():
                 print(f"- {conv_id} (current)")
             else:
                 print(f"- {conv_id}")
+
+        # List all model configurations
+        print("\n\nListing all available model configurations:")
+        models = chat.list_models()
+        for model in models:
+            model_id = model.get("model_id", "unknown")
+            model_config = model.get("config", {})
+            model_name = model_config.get("model", "unknown")
+            temp = model_config.get("temperature", "unknown")
+
+            if model_id == chat.model_id:
+                print(f"- {model_id} (current): {model_name}, temp={temp}")
+            else:
+                print(f"- {model_id}: {model_name}, temp={temp}")
 
         # Optionally clean up by deleting the conversation
         delete_choice = input("\nDelete this conversation? (y/n): ").lower()
