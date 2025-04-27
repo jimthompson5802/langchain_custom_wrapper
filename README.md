@@ -83,7 +83,7 @@ python src/wrapper/test_redis_client.py --action delete --conversation_id "your-
 A client that mimics the LangChain OpenAI chat completion class, allowing for more integration with other LangChain components:
 
 ```python
-from src.wrapper.test_client import FastAPIChatOpenAI
+from src.wrapper.fastapi_chat import FastAPIChatOpenAI, SystemMessage, HumanMessage
 
 # Initialize the client (creates a model configuration in Redis)
 chat = FastAPIChatOpenAI(
@@ -93,8 +93,6 @@ chat = FastAPIChatOpenAI(
 )
 
 # Create messages in LangChain format
-from src.wrapper.test_client import SystemMessage, HumanMessage
-
 messages = [
     SystemMessage(content="You are a helpful assistant."),
     HumanMessage(content="What is the capital of Hawaii?")
@@ -233,7 +231,10 @@ langchain_wrapper/
 │   │   └── server.py    # Basic FastAPI server example
 │   └── wrapper/
 │       ├── baseline_testbed.py     # Direct OpenAI API test
+│       ├── fastapi_chat.py         # FastAPI Chat wrapper
 │       ├── langchain_server.py     # Main FastAPI server with Redis
 │       ├── test_client.py          # LangChain-compatible client
-│       └── test_redis_client.py    # CLI client for testing
+│       ├── test_redis_client.py    # CLI client for testing
+│       ├── testbed_baseline.py     # Baseline testbed
+│       └── testbed_custom.py       # Custom testbed
 ```
